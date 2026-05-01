@@ -47,8 +47,12 @@ export default function WeeklyView() {
                       key={slot.id}
                       slot={slot}
                       onDelete={async () => {
-                        await supabase.from('weekly_schedule_templates').delete().eq('id', slot.id);
-                        reload();
+                        const { error } = await supabase
+                          .from('weekly_schedule_templates')
+                          .delete()
+                          .eq('id', slot.id);
+                        if (error) throw new Error(error.message);
+                        await reload();
                       }}
                     />
                   ))}
@@ -80,15 +84,53 @@ export default function WeeklyView() {
   );
 }
 
-function WeeklySlotCard({ slot, onDelete }: { slot: WeeklyTemplateWithDealer; onDelete: () => void }) {
+function WeeklySlotCard({ slot, onDelete }: { slot: WeeklyTemplateWithDealer; onDelete: () => Promise<void> }) {
   const color = getDealerColor(slot.dealer_id);
-  const [showDelete, setShowDelete] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await onDelete();
+    } catch (e: unknown) {
+      setDeleteError(e instanceof Error ? e.message : 'Failed to remove');
+      setDeleting(false);
+    }
+  };
+
+  if (confirming) {
+    return (
+      <div className={`rounded-lg border p-2 ${color.light} ${color.border}`}>
+        <div className="text-xs font-semibold text-slate-700 mb-1.5">Remove slot?</div>
+        {deleteError && (
+          <div className="text-xs text-red-500 mb-1.5 leading-tight">{deleteError}</div>
+        )}
+        <div className="flex gap-1">
+          <button
+            type="button"
+            onClick={() => { setConfirming(false); setDeleteError(null); }}
+            className="flex-1 text-xs py-1 border border-slate-200 rounded text-slate-500 hover:bg-slate-100 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={deleting}
+            className="flex-1 text-xs py-1 bg-red-500 text-white rounded hover:bg-red-600 transition-colors disabled:opacity-60"
+          >
+            {deleting ? '...' : 'Remove'}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div
-      className={`rounded-lg border p-2 cursor-pointer transition-all ${color.light} ${color.border} relative`}
-      onClick={() => setShowDelete(!showDelete)}
-    >
+    <div className={`group rounded-lg border p-2 transition-all ${color.light} ${color.border} relative`}>
       <div className={`text-xs font-bold ${color.text}`}>{slot.dealer.code}</div>
       <div className="text-xs text-slate-600 font-medium truncate">{slot.dealer.name.split(' ')[0]}</div>
       <div className="text-xs text-slate-500">{formatTime(slot.scheduled_time)}</div>
@@ -97,14 +139,13 @@ function WeeklySlotCard({ slot, onDelete }: { slot: WeeklyTemplateWithDealer; on
         {slot.planned_19l > 0 && slot.planned_10l > 0 && <span className="text-slate-400"> / </span>}
         {slot.planned_10l > 0 && <span className="text-cyan-600">{slot.planned_10l}</span>}
       </div>
-      {showDelete && (
-        <button
-          onClick={e => { e.stopPropagation(); onDelete(); }}
-          className="absolute top-1 right-1 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center font-bold hover:bg-red-600"
-        >
-          ×
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={() => setConfirming(true)}
+        className="absolute top-1 right-1 w-5 h-5 bg-red-500 text-white rounded-full text-xs items-center justify-center font-bold hover:bg-red-600 transition-colors hidden group-hover:flex"
+      >
+        ×
+      </button>
     </div>
   );
 }

@@ -155,3 +155,13 @@ export function getCurrentTimeStr(): string {
   const now = new Date();
   return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 }
+
+export function formatFillDuration(bottles: number, fillSpeedPerHour: number): string {
+  if (bottles <= 0 || fillSpeedPerHour <= 0) return '';
+  const totalMinutes = Math.round((bottles / fillSpeedPerHour) * 60);
+  if (totalMinutes < 1) return '<1 min';
+  if (totalMinutes < 60) return `${totalMinutes} min`;
+  const hours = Math.floor(totalMinutes / 60);
+  const mins = totalMinutes % 60;
+  return mins > 0 ? `${hours}h ${mins}min` : `${hours}h`;
+}

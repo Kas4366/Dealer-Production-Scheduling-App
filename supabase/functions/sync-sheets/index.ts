@@ -13,7 +13,7 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const { sheet_id, week_dates } = await req.json();
+    const { sheet_id, week_dates, record_ids } = await req.json();
 
     if (!sheet_id) {
       return new Response(JSON.stringify({ error: "sheet_id is required" }), {
@@ -27,7 +27,6 @@ Deno.serve(async (req: Request) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    // Fetch unsynced visit records (or all for the week if week_dates provided)
     let query = supabase
       .from("visit_records")
       .select(`
@@ -40,9 +39,14 @@ Deno.serve(async (req: Request) => {
         )
       `);
 
-    if (week_dates && week_dates.length > 0) {
+    if (record_ids && record_ids.length > 0) {
+      // Targeted sync: only the specific records requested
+      query = query.in("id", record_ids);
+    } else if (week_dates && week_dates.length > 0) {
+      // Week sync: all records for given dates
       query = query.in("slot_date", week_dates);
     } else {
+      // Fallback: all unsynced records
       query = query.eq("synced_to_sheets", false);
     }
 
@@ -76,6 +80,15 @@ Deno.serve(async (req: Request) => {
       const originalDay = ds?.original_date ? new Date(ds.original_date + "T00:00:00").toLocaleDateString("en-GB") : "";
       const swappedWith = ds?.swapped_with_dealer?.name ?? "";
 
+      // Saved date (S) and saved time (T) from updated_at, in Sri Lanka time (UTC+5:30)
+      const savedAt = r.updated_at ? new Date(r.updated_at) : null;
+      const savedDate = savedAt
+        ? savedAt.toLocaleDateString("en-GB", { timeZone: "Asia/Colombo" })
+        : "";
+      const savedTime = savedAt
+        ? savedAt.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "Asia/Colombo" })
+        : "";
+
       return [
         date.toLocaleDateString("en-GB"),          // A: Date
         dayName,                                     // B: Day
@@ -95,11 +108,13 @@ Deno.serve(async (req: Request) => {
         swappedWith,                                 // P: Swapped With
         r.recorded_by ?? "",                         // Q: Recorded By
         r.notes ?? "",                               // R: Notes
+        savedDate,                                   // S: Saved Date
+        savedTime,                                   // T: Saved Time
       ];
     });
 
     // Append to Google Sheet
-    const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${sheet_id}/values/Daily%20Records!A:R:append?valueInputOption=USER_ENTERED`;
+    const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${sheet_id}/values/Daily%20Records!A:T:append?valueInputOption=USER_ENTERED`;
     const sheetsRes = await fetch(appendUrl, {
       method: "POST",
       headers: {
@@ -139,12 +154,10 @@ async function getGoogleAccessToken(serviceAccount: any): Promise<string> {
     exp: now + 3600,
   };
 
-  // Encode JWT header and payload
   const header = { alg: "RS256", typ: "JWT" };
   const encode = (obj: object) => btoa(JSON.stringify(obj)).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
   const signingInput = `${encode(header)}.${encode(payload)}`;
 
-  // Sign with RS256 using the service account private key
   const keyData = serviceAccount.private_key
     .replace(/-----BEGIN PRIVATE KEY-----/, "")
     .replace(/-----END PRIVATE KEY-----/, "")
@@ -170,7 +183,6 @@ async function getGoogleAccessToken(serviceAccount: any): Promise<string> {
 
   const jwt = `${signingInput}.${sigBase64}`;
 
-  // Exchange JWT for access token
   const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },

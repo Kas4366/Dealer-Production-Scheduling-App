@@ -1,16 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { X, Clock, CheckCircle, XCircle, Zap, Save } from 'lucide-react';
+import { X, Clock, CheckCircle, XCircle, Zap, Save, CloudOff, Cloud, Timer } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import type { DailyScheduleWithDealer, VisitStatus } from '../lib/database.types';
-import { getDealerColor, formatTime, getCurrentTimeStr } from '../lib/utils';
+import { getDealerColor, formatTime, getCurrentTimeStr, formatFillDuration } from '../lib/utils';
 
 interface Props {
   slot: DailyScheduleWithDealer;
+  fillSpeed: number;
   onClose: () => void;
   onSaved: () => void;
 }
 
-export default function VisitPanel({ slot, onClose, onSaved }: Props) {
+type SyncState = 'idle' | 'synced' | 'failed';
+
+export default function VisitPanel({ slot, fillSpeed, onClose, onSaved }: Props) {
   const color = getDealerColor(slot.dealer_id);
   const existing = slot.visit_record;
 
@@ -23,6 +26,7 @@ export default function VisitPanel({ slot, onClose, onSaved }: Props) {
   const [notes, setNotes] = useState(existing?.notes ?? '');
   const [recordedBy, setRecordedBy] = useState(existing?.recorded_by ?? '');
   const [saving, setSaving] = useState(false);
+  const [syncState, setSyncState] = useState<SyncState>('idle');
 
   useEffect(() => {
     document.body.style.overflow = 'hidden';
@@ -38,6 +42,7 @@ export default function VisitPanel({ slot, onClose, onSaved }: Props) {
 
   const handleSave = async () => {
     setSaving(true);
+    setSyncState('idle');
     const payload = {
       daily_schedule_id: slot.id,
       slot_date: slot.slot_date,
@@ -54,11 +59,37 @@ export default function VisitPanel({ slot, onClose, onSaved }: Props) {
       updated_at: new Date().toISOString(),
     };
 
+    let savedId: string | null = existing?.id ?? null;
     if (existing?.id) {
       await supabase.from('visit_records').update(payload).eq('id', existing.id);
     } else {
-      await supabase.from('visit_records').insert(payload);
+      const { data: inserted } = await supabase
+        .from('visit_records')
+        .insert(payload)
+        .select('id')
+        .maybeSingle();
+      savedId = inserted?.id ?? null;
     }
+
+    // Auto-sync only this specific record to Google Sheets
+    const endpointUrl = localStorage.getItem('sheets_url');
+    const sheetId = localStorage.getItem('sheets_id');
+    if (endpointUrl && sheetId && savedId) {
+      try {
+        const res = await fetch(endpointUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({ sheet_id: sheetId, record_ids: [savedId] }),
+        });
+        setSyncState(res.ok ? 'synced' : 'failed');
+      } catch {
+        setSyncState('failed');
+      }
+    }
+
     setSaving(false);
     onSaved();
   };
@@ -100,6 +131,42 @@ export default function VisitPanel({ slot, onClose, onSaved }: Props) {
         </div>
 
         <div className="p-5 space-y-5">
+          {/* Production time estimate */}
+          {fillSpeed > 0 && (slot.planned_19l + slot.planned_10l) > 0 && (() => {
+            const total = slot.planned_19l + slot.planned_10l;
+            const totalMins = Math.round((total / fillSpeed) * 60);
+            const duration = formatFillDuration(total, fillSpeed);
+            return (
+              <div className="bg-slate-50 rounded-xl border border-slate-200 p-3.5">
+                <div className="flex items-center gap-2 mb-2">
+                  <Timer size={14} className="text-slate-500" />
+                  <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Estimated Production Time</span>
+                </div>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl font-bold text-slate-800">~{duration}</span>
+                  <span className="text-xs text-slate-500">@ {fillSpeed} bottles/hr</span>
+                </div>
+                <div className="flex items-center gap-3 mt-2 text-xs text-slate-500">
+                  {slot.planned_19l > 0 && (
+                    <span className="flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-blue-400 inline-block" />
+                      19L × {slot.planned_19l} = ~{Math.round((slot.planned_19l / fillSpeed) * 60)} min
+                    </span>
+                  )}
+                  {slot.planned_10l > 0 && (
+                    <span className="flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-cyan-400 inline-block" />
+                      10L × {slot.planned_10l} = ~{Math.round((slot.planned_10l / fillSpeed) * 60)} min
+                    </span>
+                  )}
+                  {slot.planned_19l > 0 && slot.planned_10l > 0 && (
+                    <span className="text-slate-400">Total: {totalMins} min</span>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Status buttons */}
           <div>
             <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 block">Status</label>
@@ -215,14 +282,28 @@ export default function VisitPanel({ slot, onClose, onSaved }: Props) {
           </div>
 
           {/* Save */}
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="w-full flex items-center justify-center gap-2 py-4 bg-blue-600 text-white rounded-xl font-semibold text-base hover:bg-blue-700 active:scale-[0.99] transition-all disabled:opacity-60"
-          >
-            <Save size={18} />
-            {saving ? 'Saving...' : 'Save Record'}
-          </button>
+          <div className="space-y-2">
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="w-full flex items-center justify-center gap-2 py-4 bg-blue-600 text-white rounded-xl font-semibold text-base hover:bg-blue-700 active:scale-[0.99] transition-all disabled:opacity-60"
+            >
+              <Save size={18} />
+              {saving ? 'Saving...' : 'Save Record'}
+            </button>
+            {syncState === 'synced' && (
+              <div className="flex items-center justify-center gap-1.5 text-xs text-emerald-600">
+                <Cloud size={13} />
+                Synced to Google Sheets
+              </div>
+            )}
+            {syncState === 'failed' && (
+              <div className="flex items-center justify-center gap-1.5 text-xs text-slate-400">
+                <CloudOff size={13} />
+                Sheets sync pending — use Sync Sheets in Reports
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

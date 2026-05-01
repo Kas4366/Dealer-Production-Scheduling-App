@@ -5,7 +5,7 @@ import { useDailySchedule, useDealers, useProductionSettings } from '../hooks/us
 import {
   getTodayDate, getWeekDates, formatDate, formatTime,
   getChangeLabel, getDayOfWeek, getDealerColor, getCurrentTimeStr,
-  getEffectiveCapacity, DAY_NAMES
+  getEffectiveCapacity, formatFillDuration, DAY_NAMES
 } from '../lib/utils';
 import type { DailyScheduleWithDealer, VisitStatus, VisitRecord } from '../lib/database.types';
 import VisitPanel from './VisitPanel';
@@ -177,6 +177,7 @@ export default function DailyView() {
             key={slot.id}
             slot={slot}
             currentTime={currentTime}
+            fillSpeed={settings?.fill_speed_per_hour ?? 0}
             onClick={() => setPanelSlot(slot)}
           />
         ))}
@@ -203,6 +204,7 @@ export default function DailyView() {
       {panelSlot && (
         <VisitPanel
           slot={panelSlot}
+          fillSpeed={settings?.fill_speed_per_hour ?? 0}
           onClose={() => setPanelSlot(null)}
           onSaved={() => { setPanelSlot(null); reload(); }}
         />
@@ -227,9 +229,10 @@ export default function DailyView() {
   );
 }
 
-function SlotCard({ slot, currentTime, onClick }: {
+function SlotCard({ slot, currentTime, fillSpeed, onClick }: {
   slot: DailyScheduleWithDealer;
   currentTime: string;
+  fillSpeed: number;
   onClick: () => void;
 }) {
   const vr = slot.visit_record;
@@ -306,6 +309,11 @@ function SlotCard({ slot, currentTime, onClick }: {
                 <span className="flex items-center gap-1">
                   <span className="w-2 h-2 rounded-full bg-cyan-400" />
                   10L: <b className="text-slate-700">{slot.planned_10l}</b>
+                </span>
+              )}
+              {fillSpeed > 0 && (slot.planned_19l + slot.planned_10l) > 0 && (
+                <span className="text-slate-400 text-[10px] font-medium">
+                  ~{formatFillDuration(slot.planned_19l + slot.planned_10l, fillSpeed)}
                 </span>
               )}
             </div>
