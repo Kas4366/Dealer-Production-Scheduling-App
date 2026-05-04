@@ -25,12 +25,15 @@ export default function GenerateWeekModal({ weekDates, onClose, onGenerated }: P
       if (dayTemplates.length === 0) continue;
 
       if (overwrite) {
-        // Remove existing template-based slots for this day
+        // Remove template-generated slots (both still-linked ones and orphaned ones
+        // whose template_slot_id was nullified when the template slot was deleted).
+        // Extra/manually-added slots are identified by change_type = 'extra' and are kept.
         await supabase
           .from('daily_schedule')
           .delete()
           .eq('slot_date', date)
-          .not('template_slot_id', 'is', null);
+          .eq('status', 'scheduled')
+          .is('change_type', null);
       }
 
       for (const t of dayTemplates) {

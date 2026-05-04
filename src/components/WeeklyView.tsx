@@ -12,7 +12,9 @@ export default function WeeklyView() {
   // Build grid: for each day, list of slots sorted by time
   const days = [0, 1, 2, 3, 4, 5];
   const byDay = days.map(d => templates.filter(t => t.day_of_week === d).sort((a, b) => a.scheduled_time.localeCompare(b.scheduled_time)));
-  const dayTotals = byDay.map(slots => slots.reduce((sum, s) => sum + s.planned_19l + s.planned_10l, 0));
+  const dayTotals19 = byDay.map(slots => slots.reduce((sum, s) => sum + s.planned_19l, 0));
+  const dayTotals10 = byDay.map(slots => slots.reduce((sum, s) => sum + s.planned_10l, 0));
+  const dayTotals = dayTotals19.map((v, i) => v + dayTotals10[i]);
 
   return (
     <div className="space-y-4">
@@ -33,7 +35,8 @@ export default function WeeklyView() {
               {DAY_NAMES.map((name, i) => (
                 <div key={name} className="text-center">
                   <div className="text-sm font-bold text-slate-700">{DAY_SHORT[i]}</div>
-                  <div className="text-xs text-slate-500 mt-0.5">{dayTotals[i]} bottles</div>
+                  <div className="text-[10px] text-blue-600 mt-0.5 font-medium">{dayTotals19[i]}×19L</div>
+                  <div className="text-[10px] text-cyan-600 font-medium">{dayTotals10[i]}×10L</div>
                 </div>
               ))}
             </div>
@@ -70,14 +73,21 @@ export default function WeeklyView() {
         <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
           {DAY_NAMES.map((name, i) => (
             <div key={name} className="text-center bg-slate-50 rounded-lg p-2">
-              <div className="text-xs text-slate-500">{DAY_SHORT[i]}</div>
-              <div className="text-lg font-bold text-blue-600">{dayTotals[i]}</div>
+              <div className="text-xs text-slate-500 mb-1">{DAY_SHORT[i]}</div>
+              <div className="text-xs font-bold text-blue-600">{dayTotals19[i]} <span className="font-normal text-slate-400">19L</span></div>
+              <div className="text-xs font-bold text-cyan-600">{dayTotals10[i]} <span className="font-normal text-slate-400">10L</span></div>
             </div>
           ))}
         </div>
         <div className="mt-3 pt-3 border-t border-slate-100 flex justify-between items-center">
           <span className="text-sm text-slate-500">Total weekly bottles</span>
-          <span className="text-xl font-bold text-slate-800">{dayTotals.reduce((a, b) => a + b, 0)}</span>
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-bold text-blue-600">{dayTotals19.reduce((a, b) => a + b, 0)} <span className="font-normal text-slate-400 text-xs">19L</span></span>
+            <span className="text-slate-300">·</span>
+            <span className="text-sm font-bold text-cyan-600">{dayTotals10.reduce((a, b) => a + b, 0)} <span className="font-normal text-slate-400 text-xs">10L</span></span>
+            <span className="text-slate-300">·</span>
+            <span className="text-xl font-bold text-slate-800">{dayTotals.reduce((a, b) => a + b, 0)}</span>
+          </div>
         </div>
       </div>
     </div>

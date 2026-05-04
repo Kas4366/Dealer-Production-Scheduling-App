@@ -41,12 +41,12 @@ export default function DailyView() {
   }, [weekOffset]);
 
   const activeSlots = slots.filter(s => s.status !== 'moved_out');
-  const totalPlanned = activeSlots.reduce((sum, s) => sum + s.planned_19l + s.planned_10l, 0);
-  const totalFilled = activeSlots.reduce((sum, s) => {
-    const vr = s.visit_record;
-    if (!vr) return sum;
-    return sum + (vr.bottles_19l_out || 0) + (vr.bottles_10l_out || 0);
-  }, 0);
+  const totalPlanned19 = activeSlots.reduce((sum, s) => sum + s.planned_19l, 0);
+  const totalPlanned10 = activeSlots.reduce((sum, s) => sum + s.planned_10l, 0);
+  const totalPlanned = totalPlanned19 + totalPlanned10;
+  const totalFilled19 = activeSlots.reduce((sum, s) => sum + (s.visit_record?.bottles_19l_out || 0), 0);
+  const totalFilled10 = activeSlots.reduce((sum, s) => sum + (s.visit_record?.bottles_10l_out || 0), 0);
+  const totalFilled = totalFilled19 + totalFilled10;
   const completed = activeSlots.filter(s => s.visit_record?.status === 'completed').length;
   const capacity = settings ? getEffectiveCapacity(settings) : 0;
 
@@ -117,14 +117,18 @@ export default function DailyView() {
       </div>
 
       {/* Stats bar */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-4 gap-2">
         <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-sm text-center">
           <div className="text-xl font-bold text-slate-800">{activeSlots.length}</div>
           <div className="text-xs text-slate-500 mt-0.5">Slots</div>
         </div>
         <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-sm text-center">
-          <div className="text-xl font-bold text-blue-600">{totalFilled}</div>
-          <div className="text-xs text-slate-500 mt-0.5">Filled</div>
+          <div className="text-xl font-bold text-blue-600">{totalFilled19}</div>
+          <div className="text-xs text-slate-500 mt-0.5">19L Filled</div>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-sm text-center">
+          <div className="text-xl font-bold text-cyan-600">{totalFilled10}</div>
+          <div className="text-xs text-slate-500 mt-0.5">10L Filled</div>
         </div>
         <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-sm text-center">
           <div className="text-xl font-bold text-emerald-600">{completed}</div>
@@ -137,7 +141,15 @@ export default function DailyView() {
         <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-sm">
           <div className="flex justify-between text-xs text-slate-500 mb-2">
             <span>Daily Progress</span>
-            <span className="font-semibold text-slate-700">{totalFilled} / {totalPlanned} bottles</span>
+            <span className="font-semibold text-slate-700">
+              <span className="text-blue-600">{totalFilled19}</span>
+              <span className="text-slate-400"> / </span>
+              <span className="text-slate-600">{totalPlanned19} 19L</span>
+              <span className="mx-1.5 text-slate-300">·</span>
+              <span className="text-cyan-600">{totalFilled10}</span>
+              <span className="text-slate-400"> / </span>
+              <span className="text-slate-600">{totalPlanned10} 10L</span>
+            </span>
           </div>
           <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
             <div

@@ -20,6 +20,10 @@ interface DaySummary {
   date: string;
   total_filled: number;
   total_planned: number;
+  filled_19l: number;
+  filled_10l: number;
+  planned_19l: number;
+  planned_10l: number;
 }
 
 export default function ReportsView() {
@@ -56,7 +60,7 @@ export default function ReportsView() {
     const dayMap: Record<string, DaySummary> = {};
 
     weekDates.forEach(d => {
-      dayMap[d] = { date: d, total_filled: 0, total_planned: 0 };
+      dayMap[d] = { date: d, total_filled: 0, total_planned: 0, filled_19l: 0, filled_10l: 0, planned_19l: 0, planned_10l: 0 };
     });
 
     for (const s of (schedules ?? [])) {
@@ -79,6 +83,8 @@ export default function ReportsView() {
 
       stats[s.dealer_id].slots_scheduled++;
       dayMap[s.slot_date].total_planned += s.planned_19l + s.planned_10l;
+      dayMap[s.slot_date].planned_19l += s.planned_19l;
+      dayMap[s.slot_date].planned_10l += s.planned_10l;
 
       const vr = Array.isArray(s.visit_record) ? s.visit_record[0] : s.visit_record;
       if (vr) {
@@ -88,6 +94,8 @@ export default function ReportsView() {
           stats[s.dealer_id].total_10l += vr.bottles_10l_out || 0;
           stats[s.dealer_id].total_bottles += (vr.bottles_19l_out || 0) + (vr.bottles_10l_out || 0);
           dayMap[s.slot_date].total_filled += (vr.bottles_19l_out || 0) + (vr.bottles_10l_out || 0);
+          dayMap[s.slot_date].filled_19l += vr.bottles_19l_out || 0;
+          dayMap[s.slot_date].filled_10l += vr.bottles_10l_out || 0;
         } else if (vr.status === 'no_show') {
           stats[s.dealer_id].slots_no_show++;
         }
@@ -125,6 +133,10 @@ export default function ReportsView() {
 
   const totalFilled = dayStats.reduce((sum, d) => sum + d.total_filled, 0);
   const totalPlanned = dayStats.reduce((sum, d) => sum + d.total_planned, 0);
+  const totalFilled19 = dayStats.reduce((sum, d) => sum + d.filled_19l, 0);
+  const totalFilled10 = dayStats.reduce((sum, d) => sum + d.filled_10l, 0);
+  const totalPlanned19 = dayStats.reduce((sum, d) => sum + d.planned_19l, 0);
+  const totalPlanned10 = dayStats.reduce((sum, d) => sum + d.planned_10l, 0);
 
   return (
     <div className="space-y-5">
@@ -160,13 +172,25 @@ export default function ReportsView() {
 
       {/* Weekly totals */}
       <div className="grid grid-cols-2 gap-3">
-        <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm text-center">
-          <div className="text-2xl font-bold text-blue-600">{totalFilled}</div>
-          <div className="text-xs text-slate-500 mt-1">Bottles Filled</div>
+        <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+          <div className="text-xs text-slate-500 mb-2 font-medium">Filled</div>
+          <div className="flex items-end justify-between">
+            <div>
+              <div className="text-lg font-bold text-blue-600">{totalFilled19} <span className="text-xs font-normal text-slate-400">19L</span></div>
+              <div className="text-lg font-bold text-cyan-600">{totalFilled10} <span className="text-xs font-normal text-slate-400">10L</span></div>
+            </div>
+            <div className="text-2xl font-bold text-slate-800">{totalFilled}</div>
+          </div>
         </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm text-center">
-          <div className="text-2xl font-bold text-slate-700">{totalPlanned}</div>
-          <div className="text-xs text-slate-500 mt-1">Bottles Planned</div>
+        <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+          <div className="text-xs text-slate-500 mb-2 font-medium">Planned</div>
+          <div className="flex items-end justify-between">
+            <div>
+              <div className="text-lg font-bold text-blue-400">{totalPlanned19} <span className="text-xs font-normal text-slate-400">19L</span></div>
+              <div className="text-lg font-bold text-cyan-400">{totalPlanned10} <span className="text-xs font-normal text-slate-400">10L</span></div>
+            </div>
+            <div className="text-2xl font-bold text-slate-700">{totalPlanned}</div>
+          </div>
         </div>
       </div>
 
@@ -180,7 +204,12 @@ export default function ReportsView() {
               <div key={day.date}>
                 <div className="flex justify-between text-xs mb-1">
                   <span className="font-medium text-slate-600">{DAY_NAMES[getDayOfWeek(day.date)]}</span>
-                  <span className="text-slate-500">{day.total_filled} / {day.total_planned}</span>
+                  <span className="text-slate-500">
+                    <span className="text-blue-600">{day.filled_19l}</span>/<span className="text-slate-400">{day.planned_19l}</span>
+                    <span className="text-slate-300 mx-1">19L</span>
+                    <span className="text-cyan-600">{day.filled_10l}</span>/<span className="text-slate-400">{day.planned_10l}</span>
+                    <span className="text-slate-300 ml-1">10L</span>
+                  </span>
                 </div>
                 <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
                   <div
