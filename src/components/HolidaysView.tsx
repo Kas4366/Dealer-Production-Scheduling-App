@@ -160,15 +160,43 @@ function RedistributePanel({ holidayDate, holidayName, onClose }: {
 
   const activeSlots = slots.filter(s => s.status === 'scheduled');
   const [assignments, setAssignments] = useState<Record<string, string>>({});
+  const [newTimes, setNewTimes] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
 
-  const capacityByDay: Record<string, number> = {};
+  // Base bottles per day from already-scheduled slots
+  const baseBottles19ByDay: Record<string, number> = {};
+  const baseBottles10ByDay: Record<string, number> = {};
   otherDates.forEach(d => {
-    capacityByDay[d] = otherSlots
+    baseBottles19ByDay[d] = otherSlots
       .filter(s => s.slot_date === d && s.status !== 'moved_out')
-      .reduce((sum, s) => sum + s.planned_19l + s.planned_10l, 0);
+      .reduce((sum, s) => sum + s.planned_19l, 0);
+    baseBottles10ByDay[d] = otherSlots
+      .filter(s => s.slot_date === d && s.status !== 'moved_out')
+      .reduce((sum, s) => sum + s.planned_10l, 0);
   });
+
+  // Live totals: base + slots currently assigned to each day in the UI
+  const getLiveTotal = (targetDate: string) => {
+    const pending19 = activeSlots
+      .filter(s => assignments[s.id] === targetDate)
+      .reduce((sum, s) => sum + s.planned_19l, 0);
+    const pending10 = activeSlots
+      .filter(s => assignments[s.id] === targetDate)
+      .reduce((sum, s) => sum + s.planned_10l, 0);
+    return {
+      total19: (baseBottles19ByDay[targetDate] ?? 0) + pending19,
+      total10: (baseBottles10ByDay[targetDate] ?? 0) + pending10,
+    };
+  };
+
+  const handleAssign = (slotId: string, slotTime: string, targetDate: string) => {
+    setAssignments(prev => ({ ...prev, [slotId]: targetDate }));
+    // Pre-fill the time input with the slot's original time when a date is first selected
+    if (targetDate && targetDate !== 'cancel' && !newTimes[slotId]) {
+      setNewTimes(prev => ({ ...prev, [slotId]: slotTime }));
+    }
+  };
 
   const handleApply = async () => {
     setSaving(true);
@@ -181,13 +209,14 @@ function RedistributePanel({ holidayDate, holidayName, onClose }: {
           .update({ status: 'cancelled', change_type: 'cancelled', change_note: `Cancelled due to ${holidayName}` })
           .eq('id', slot.id);
       } else {
+        const scheduledTime = newTimes[slot.id] || slot.scheduled_time;
         await supabase.from('daily_schedule')
           .update({ status: 'moved_out', change_type: 'moved_out', change_note: `Moved to ${DAY_NAMES[getDayOfWeek(targetDate)]} due to ${holidayName}` })
           .eq('id', slot.id);
         await supabase.from('daily_schedule').insert({
           slot_date: targetDate,
           dealer_id: slot.dealer_id,
-          scheduled_time: slot.scheduled_time,
+          scheduled_time: scheduledTime,
           planned_19l: slot.planned_19l,
           planned_10l: slot.planned_10l,
           status: 'scheduled',
@@ -220,30 +249,72 @@ function RedistributePanel({ holidayDate, holidayName, onClose }: {
         <AlertTriangle size={14} className="text-amber-500" />
         <span className="text-sm font-semibold text-slate-700">Redistribute {activeSlots.length} slots from {holidayName}</span>
       </div>
-      <div className="text-xs text-slate-500">Choose a day to move each dealer's slot to, or cancel it.</div>
+      <div className="text-xs text-slate-500">Choose a day and arrival time for each slot, or cancel it.</div>
 
-      {activeSlots.map(slot => (
-        <div key={slot.id} className="flex items-center gap-3 bg-white rounded-xl p-3 border border-slate-200">
-          <div className="flex-1 min-w-0">
-            <div className="font-semibold text-sm text-slate-800 truncate">{slot.dealer.name}</div>
-            <div className="text-xs text-slate-500">{formatTime(slot.scheduled_time)} · {slot.planned_19l + slot.planned_10l} bottles</div>
+      {activeSlots.map(slot => {
+        const targetDate = assignments[slot.id];
+        const hasDate = targetDate && targetDate !== 'cancel' && targetDate !== '';
+        const live = hasDate ? getLiveTotal(targetDate) : null;
+
+        return (
+          <div key={slot.id} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            {/* Slot info row */}
+            <div className="flex items-center gap-3 p-3">
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-sm text-slate-800 truncate">{slot.dealer.name}</div>
+                <div className="text-xs text-slate-500">
+                  {formatTime(slot.scheduled_time)}
+                  <span className="mx-1">·</span>
+                  <span className="text-blue-600">{slot.planned_19l} 19L</span>
+                  <span className="mx-1 text-slate-300">·</span>
+                  <span className="text-cyan-600">{slot.planned_10l} 10L</span>
+                </div>
+              </div>
+              <ArrowRight size={14} className="text-slate-400 shrink-0" />
+              <select
+                value={assignments[slot.id] ?? ''}
+                onChange={e => handleAssign(slot.id, slot.scheduled_time, e.target.value)}
+                className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300"
+              >
+                <option value="">-- Keep --</option>
+                <option value="cancel">Cancel slot</option>
+                {otherDates.map(d => {
+                  const { total19, total10 } = getLiveTotal(d);
+                  return (
+                    <option key={d} value={d}>
+                      {DAY_NAMES[getDayOfWeek(d)]} · {total19} 19L · {total10} 10L
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+
+            {/* Time picker + live total — shown only when a date is selected */}
+            {hasDate && (
+              <div className="border-t border-slate-100 bg-slate-50 px-3 py-2.5 flex items-center justify-between gap-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-500 font-medium">Arrival time</span>
+                  <input
+                    type="time"
+                    value={newTimes[slot.id] ?? slot.scheduled_time}
+                    onChange={e => setNewTimes(prev => ({ ...prev, [slot.id]: e.target.value }))}
+                    className="border border-slate-200 rounded-lg px-2 py-1 text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white"
+                  />
+                </div>
+                {live && (
+                  <div className="text-xs text-slate-500 text-right">
+                    <span className="text-slate-400">Day total after move: </span>
+                    <span className="font-semibold text-blue-600">{live.total19} 19L</span>
+                    <span className="text-slate-300 mx-1">·</span>
+                    <span className="font-semibold text-cyan-600">{live.total10} 10L</span>
+                    <span className="font-semibold text-slate-600 ml-1">({live.total19 + live.total10})</span>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-          <ArrowRight size={14} className="text-slate-400 shrink-0" />
-          <select
-            value={assignments[slot.id] ?? ''}
-            onChange={e => setAssignments(prev => ({ ...prev, [slot.id]: e.target.value }))}
-            className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300"
-          >
-            <option value="">-- Keep --</option>
-            <option value="cancel">Cancel slot</option>
-            {otherDates.map(d => (
-              <option key={d} value={d}>
-                {DAY_NAMES[getDayOfWeek(d)]} ({capacityByDay[d]} bottles)
-              </option>
-            ))}
-          </select>
-        </div>
-      ))}
+        );
+      })}
 
       <div className="flex gap-3 pt-1">
         <button onClick={onClose} className="flex-1 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-600 font-medium hover:bg-white transition-colors">
