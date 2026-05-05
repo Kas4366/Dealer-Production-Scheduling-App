@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useHolidays, useDailySchedule, useDealers } from '../hooks/useData';
 import { formatDate, formatTime, getWeekDates, getDayOfWeek, DAY_NAMES } from '../lib/utils';
 import type { DailyScheduleWithDealer } from '../lib/database.types';
+import TimeInput from './TimeInput';
 
 export default function HolidaysView() {
   const { holidays, reload } = useHolidays();
@@ -161,6 +162,8 @@ function RedistributePanel({ holidayDate, holidayName, onClose }: {
   const activeSlots = slots.filter(s => s.status === 'scheduled');
   const [assignments, setAssignments] = useState<Record<string, string>>({});
   const [newTimes, setNewTimes] = useState<Record<string, string>>({});
+  const [newQty19, setNewQty19] = useState<Record<string, string>>({});
+  const [newQty10, setNewQty10] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
 
@@ -176,25 +179,27 @@ function RedistributePanel({ holidayDate, holidayName, onClose }: {
       .reduce((sum, s) => sum + s.planned_10l, 0);
   });
 
-  // Live totals: base + slots currently assigned to each day in the UI
+  // Live totals: base + slots currently assigned to each day in the UI (using overridden qty when set)
   const getLiveTotal = (targetDate: string) => {
     const pending19 = activeSlots
       .filter(s => assignments[s.id] === targetDate)
-      .reduce((sum, s) => sum + s.planned_19l, 0);
+      .reduce((sum, s) => sum + (parseInt(newQty19[s.id] ?? '') || s.planned_19l), 0);
     const pending10 = activeSlots
       .filter(s => assignments[s.id] === targetDate)
-      .reduce((sum, s) => sum + s.planned_10l, 0);
+      .reduce((sum, s) => sum + (parseInt(newQty10[s.id] ?? '') || s.planned_10l), 0);
     return {
       total19: (baseBottles19ByDay[targetDate] ?? 0) + pending19,
       total10: (baseBottles10ByDay[targetDate] ?? 0) + pending10,
     };
   };
 
-  const handleAssign = (slotId: string, slotTime: string, targetDate: string) => {
+  const handleAssign = (slotId: string, slot: { scheduled_time: string; planned_19l: number; planned_10l: number }, targetDate: string) => {
     setAssignments(prev => ({ ...prev, [slotId]: targetDate }));
-    // Pre-fill the time input with the slot's original time when a date is first selected
-    if (targetDate && targetDate !== 'cancel' && !newTimes[slotId]) {
-      setNewTimes(prev => ({ ...prev, [slotId]: slotTime }));
+    // Pre-fill time and quantity inputs with original values on first selection
+    if (targetDate && targetDate !== 'cancel') {
+      if (!newTimes[slotId]) setNewTimes(prev => ({ ...prev, [slotId]: slot.scheduled_time }));
+      if (!newQty19[slotId]) setNewQty19(prev => ({ ...prev, [slotId]: String(slot.planned_19l) }));
+      if (!newQty10[slotId]) setNewQty10(prev => ({ ...prev, [slotId]: String(slot.planned_10l) }));
     }
   };
 
@@ -210,6 +215,8 @@ function RedistributePanel({ holidayDate, holidayName, onClose }: {
           .eq('id', slot.id);
       } else {
         const scheduledTime = newTimes[slot.id] || slot.scheduled_time;
+        const planned19l = parseInt(newQty19[slot.id] ?? '') || slot.planned_19l;
+        const planned10l = parseInt(newQty10[slot.id] ?? '') || slot.planned_10l;
         await supabase.from('daily_schedule')
           .update({ status: 'moved_out', change_type: 'moved_out', change_note: `Moved to ${DAY_NAMES[getDayOfWeek(targetDate)]} due to ${holidayName}` })
           .eq('id', slot.id);
@@ -217,8 +224,8 @@ function RedistributePanel({ holidayDate, holidayName, onClose }: {
           slot_date: targetDate,
           dealer_id: slot.dealer_id,
           scheduled_time: scheduledTime,
-          planned_19l: slot.planned_19l,
-          planned_10l: slot.planned_10l,
+          planned_19l,
+          planned_10l,
           status: 'scheduled',
           change_type: 'moved_in',
           original_date: holidayDate,
@@ -273,7 +280,7 @@ function RedistributePanel({ holidayDate, holidayName, onClose }: {
               <ArrowRight size={14} className="text-slate-400 shrink-0" />
               <select
                 value={assignments[slot.id] ?? ''}
-                onChange={e => handleAssign(slot.id, slot.scheduled_time, e.target.value)}
+                onChange={e => handleAssign(slot.id, slot, e.target.value)}
                 className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300"
               >
                 <option value="">-- Keep --</option>
@@ -289,20 +296,52 @@ function RedistributePanel({ holidayDate, holidayName, onClose }: {
               </select>
             </div>
 
-            {/* Time picker + live total — shown only when a date is selected */}
+            {/* Arrival time, quantities, and live total — shown when a date is selected */}
             {hasDate && (
-              <div className="border-t border-slate-100 bg-slate-50 px-3 py-2.5 flex items-center justify-between gap-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-500 font-medium">Arrival time</span>
-                  <input
-                    type="time"
-                    value={newTimes[slot.id] ?? slot.scheduled_time}
-                    onChange={e => setNewTimes(prev => ({ ...prev, [slot.id]: e.target.value }))}
-                    className="border border-slate-200 rounded-lg px-2 py-1 text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white"
-                  />
+              <div className="border-t border-slate-100 bg-slate-50 px-3 py-3 space-y-2.5">
+                {/* Row 1: arrival time */}
+                <div className="flex items-start gap-3">
+                  <div className="flex-1">
+                    <div className="text-xs text-slate-500 font-medium mb-1">Arrival Time</div>
+                    <TimeInput
+                      value={newTimes[slot.id] ?? slot.scheduled_time}
+                      onChange={v => setNewTimes(prev => ({ ...prev, [slot.id]: v }))}
+                      className="w-full text-xs py-1.5 px-2"
+                    />
+                  </div>
                 </div>
+                {/* Row 2: qty overrides */}
+                <div className="flex items-center gap-3">
+                  <div className="flex-1">
+                    <div className="text-xs text-slate-500 font-medium mb-1 flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-blue-400 inline-block" />
+                      19L Qty
+                    </div>
+                    <input
+                      type="number"
+                      min="0"
+                      value={newQty19[slot.id] ?? slot.planned_19l}
+                      onChange={e => setNewQty19(prev => ({ ...prev, [slot.id]: e.target.value }))}
+                      className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold text-center focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-xs text-slate-500 font-medium mb-1 flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-cyan-400 inline-block" />
+                      10L Qty
+                    </div>
+                    <input
+                      type="number"
+                      min="0"
+                      value={newQty10[slot.id] ?? slot.planned_10l}
+                      onChange={e => setNewQty10(prev => ({ ...prev, [slot.id]: e.target.value }))}
+                      className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold text-center focus:outline-none focus:ring-2 focus:ring-cyan-300 bg-white"
+                    />
+                  </div>
+                </div>
+                {/* Row 3: live day total */}
                 {live && (
-                  <div className="text-xs text-slate-500 text-right">
+                  <div className="text-xs text-slate-500 pt-0.5">
                     <span className="text-slate-400">Day total after move: </span>
                     <span className="font-semibold text-blue-600">{live.total19} 19L</span>
                     <span className="text-slate-300 mx-1">·</span>

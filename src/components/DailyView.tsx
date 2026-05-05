@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, Clock, Package, CheckCircle, XCircle, AlertCircle, RefreshCw, ArrowRightLeft, ArrowRight, Plus, Zap } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Clock, Package, CheckCircle, XCircle, AlertCircle, RefreshCw, ArrowRightLeft, ArrowRight, Plus, Zap, Trash2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useDailySchedule, useDealers, useProductionSettings } from '../hooks/useData';
 import {
@@ -46,6 +46,7 @@ export default function DailyView() {
   const totalPlanned = totalPlanned19 + totalPlanned10;
   const totalFilled19 = activeSlots.reduce((sum, s) => sum + (s.visit_record?.bottles_19l_out || 0), 0);
   const totalFilled10 = activeSlots.reduce((sum, s) => sum + (s.visit_record?.bottles_10l_out || 0), 0);
+  const totalFilledHome = activeSlots.reduce((sum, s) => sum + (s.visit_record?.bottles_home || 0), 0);
   const totalFilled = totalFilled19 + totalFilled10;
   const completed = activeSlots.filter(s => s.visit_record?.status === 'completed').length;
   const capacity = settings ? getEffectiveCapacity(settings) : 0;
@@ -117,18 +118,22 @@ export default function DailyView() {
       </div>
 
       {/* Stats bar */}
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-5 gap-2">
         <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-sm text-center">
           <div className="text-xl font-bold text-slate-800">{activeSlots.length}</div>
           <div className="text-xs text-slate-500 mt-0.5">Slots</div>
         </div>
         <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-sm text-center">
           <div className="text-xl font-bold text-blue-600">{totalFilled19}</div>
-          <div className="text-xs text-slate-500 mt-0.5">19L Filled</div>
+          <div className="text-xs text-slate-500 mt-0.5">19L</div>
         </div>
         <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-sm text-center">
           <div className="text-xl font-bold text-cyan-600">{totalFilled10}</div>
-          <div className="text-xs text-slate-500 mt-0.5">10L Filled</div>
+          <div className="text-xs text-slate-500 mt-0.5">10L</div>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-sm text-center">
+          <div className="text-xl font-bold text-emerald-500">{totalFilledHome}</div>
+          <div className="text-xs text-slate-500 mt-0.5">Home</div>
         </div>
         <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-sm text-center">
           <div className="text-xl font-bold text-emerald-600">{completed}</div>
@@ -149,6 +154,12 @@ export default function DailyView() {
               <span className="text-cyan-600">{totalFilled10}</span>
               <span className="text-slate-400"> / </span>
               <span className="text-slate-600">{totalPlanned10} 10L</span>
+              {totalFilledHome > 0 && (
+                <>
+                  <span className="mx-1.5 text-slate-300">·</span>
+                  <span className="text-emerald-500">{totalFilledHome} Home</span>
+                </>
+              )}
             </span>
           </div>
           <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
@@ -191,6 +202,10 @@ export default function DailyView() {
             currentTime={currentTime}
             fillSpeed={settings?.fill_speed_per_hour ?? 0}
             onClick={() => setPanelSlot(slot)}
+            onDelete={async () => {
+              await supabase.from('daily_schedule').delete().eq('id', slot.id);
+              reload();
+            }}
           />
         ))}
         {!loading && activeSlots.length > 0 && (
@@ -241,18 +256,19 @@ export default function DailyView() {
   );
 }
 
-function SlotCard({ slot, currentTime, fillSpeed, onClick }: {
+function SlotCard({ slot, currentTime, fillSpeed, onClick, onDelete }: {
   slot: DailyScheduleWithDealer;
   currentTime: string;
   fillSpeed: number;
   onClick: () => void;
+  onDelete: () => void;
 }) {
   const vr = slot.visit_record;
   const status = vr?.status ?? 'pending';
   const color = getDealerColor(slot.dealer_id);
   const changeLabel = getChangeLabel(slot.change_type, slot.original_date, slot.swapped_with_dealer?.name);
-  const isActive = slot.scheduled_time <= currentTime && slot.scheduled_time >= currentTime.slice(0, 2) + ':00';
   const isPast = slot.scheduled_time < currentTime;
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const statusConfig = {
     pending: { icon: Clock, color: 'text-slate-400', bg: 'bg-slate-100', label: 'Pending' },
@@ -264,83 +280,118 @@ function SlotCard({ slot, currentTime, fillSpeed, onClick }: {
   const StatusIcon = statusConfig.icon;
 
   return (
-    <button
-      onClick={onClick}
-      className={`w-full text-left bg-white rounded-xl border shadow-sm p-4 transition-all hover:shadow-md active:scale-[0.99] ${
-        status === 'completed' ? 'border-emerald-200 opacity-80' :
-        status === 'no_show' ? 'border-red-200 opacity-70' :
-        isPast && status === 'pending' ? 'border-amber-200' :
-        'border-slate-200'
-      }`}
-    >
-      {/* Change banner */}
-      {changeLabel && (
-        <div className={`flex items-center gap-1.5 text-xs font-medium mb-2 px-2 py-1 rounded-md ${
-          slot.change_type === 'moved_in' ? 'bg-blue-50 text-blue-600' :
-          slot.change_type === 'swapped' ? 'bg-orange-50 text-orange-600' :
-          slot.change_type === 'extra' ? 'bg-emerald-50 text-emerald-600' :
-          'bg-slate-50 text-slate-500'
-        }`}>
-          {slot.change_type === 'moved_in' && <ArrowRight size={13} />}
-          {slot.change_type === 'swapped' && <ArrowRightLeft size={13} />}
-          {changeLabel}
+    <div className={`w-full bg-white rounded-xl border shadow-sm transition-all ${
+      status === 'completed' ? 'border-emerald-200 opacity-80' :
+      status === 'no_show' ? 'border-red-200 opacity-70' :
+      isPast && status === 'pending' ? 'border-amber-200' :
+      'border-slate-200'
+    }`}>
+      <button
+        onClick={onClick}
+        className="w-full text-left p-4 hover:bg-slate-50/50 rounded-xl active:scale-[0.99] transition-all"
+      >
+        {/* Change banner */}
+        {changeLabel && (
+          <div className={`flex items-center gap-1.5 text-xs font-medium mb-2 px-2 py-1 rounded-md ${
+            slot.change_type === 'moved_in' ? 'bg-blue-50 text-blue-600' :
+            slot.change_type === 'swapped' ? 'bg-orange-50 text-orange-600' :
+            slot.change_type === 'extra' ? 'bg-emerald-50 text-emerald-600' :
+            'bg-slate-50 text-slate-500'
+          }`}>
+            {slot.change_type === 'moved_in' && <ArrowRight size={13} />}
+            {slot.change_type === 'swapped' && <ArrowRightLeft size={13} />}
+            {changeLabel}
+          </div>
+        )}
+
+        <div className="flex items-start gap-3">
+          <div className={`w-1 self-stretch rounded-full ${color.bg} shrink-0`} />
+
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <span className={`inline-block px-2 py-0.5 rounded text-xs font-bold ${color.light} ${color.text} mr-2`}>
+                  {slot.dealer.code}
+                </span>
+                <span className="font-semibold text-slate-800 text-sm">{slot.dealer.name}</span>
+              </div>
+              <div className={`flex items-center gap-1 px-2 py-1 rounded-lg ${statusConfig.bg}`}>
+                <StatusIcon size={13} className={statusConfig.color} />
+                <span className={`text-xs font-medium ${statusConfig.color}`}>{statusConfig.label}</span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-4 mt-2">
+              <div className="flex items-center gap-1.5 text-slate-500">
+                <Clock size={13} />
+                <span className="text-sm font-semibold">{formatTime(slot.scheduled_time)}</span>
+              </div>
+              <div className="flex items-center gap-3 text-xs text-slate-500">
+                {slot.planned_19l > 0 && (
+                  <span className="flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-blue-400" />
+                    19L: <b className="text-slate-700">{slot.planned_19l}</b>
+                  </span>
+                )}
+                {slot.planned_10l > 0 && (
+                  <span className="flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-cyan-400" />
+                    10L: <b className="text-slate-700">{slot.planned_10l}</b>
+                  </span>
+                )}
+                {fillSpeed > 0 && (slot.planned_19l + slot.planned_10l) > 0 && (
+                  <span className="text-slate-400 text-[10px] font-medium">
+                    ~{formatFillDuration(slot.planned_19l + slot.planned_10l, fillSpeed)}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Actual counts if recorded */}
+            {vr && (vr.bottles_19l_out > 0 || vr.bottles_10l_out > 0 || vr.bottles_home > 0) && (
+              <div className="flex gap-3 mt-1.5 text-xs text-emerald-600 font-medium">
+                <span>Filled:</span>
+                {vr.bottles_19l_out > 0 && <span>19L: {vr.bottles_19l_out}</span>}
+                {vr.bottles_10l_out > 0 && <span>10L: {vr.bottles_10l_out}</span>}
+                {vr.bottles_home > 0 && (
+                  <span className="text-emerald-500">Home: {vr.bottles_home}</span>
+                )}
+              </div>
+            )}
+          </div>
         </div>
-      )}
+      </button>
 
-      <div className="flex items-start gap-3">
-        {/* Color indicator */}
-        <div className={`w-1 self-stretch rounded-full ${color.bg} shrink-0`} />
-
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <span className={`inline-block px-2 py-0.5 rounded text-xs font-bold ${color.light} ${color.text} mr-2`}>
-                {slot.dealer.code}
-              </span>
-              <span className="font-semibold text-slate-800 text-sm">{slot.dealer.name}</span>
-            </div>
-            <div className={`flex items-center gap-1 px-2 py-1 rounded-lg ${statusConfig.bg}`}>
-              <StatusIcon size={13} className={statusConfig.color} />
-              <span className={`text-xs font-medium ${statusConfig.color}`}>{statusConfig.label}</span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-4 mt-2">
-            <div className="flex items-center gap-1.5 text-slate-500">
-              <Clock size={13} />
-              <span className="text-sm font-semibold">{formatTime(slot.scheduled_time)}</span>
-            </div>
-            <div className="flex items-center gap-3 text-xs text-slate-500">
-              {slot.planned_19l > 0 && (
-                <span className="flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-blue-400" />
-                  19L: <b className="text-slate-700">{slot.planned_19l}</b>
-                </span>
-              )}
-              {slot.planned_10l > 0 && (
-                <span className="flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-cyan-400" />
-                  10L: <b className="text-slate-700">{slot.planned_10l}</b>
-                </span>
-              )}
-              {fillSpeed > 0 && (slot.planned_19l + slot.planned_10l) > 0 && (
-                <span className="text-slate-400 text-[10px] font-medium">
-                  ~{formatFillDuration(slot.planned_19l + slot.planned_10l, fillSpeed)}
-                </span>
-              )}
-            </div>
-          </div>
-
-          {/* Actual counts if recorded */}
-          {vr && (vr.bottles_19l_out > 0 || vr.bottles_10l_out > 0) && (
-            <div className="flex gap-3 mt-1.5 text-xs text-emerald-600 font-medium">
-              <span>Filled:</span>
-              {vr.bottles_19l_out > 0 && <span>19L: {vr.bottles_19l_out}</span>}
-              {vr.bottles_10l_out > 0 && <span>10L: {vr.bottles_10l_out}</span>}
-            </div>
+      {/* Delete button for extra slots */}
+      {slot.change_type === 'extra' && (
+        <div className="border-t border-slate-100 px-4 py-2 flex items-center justify-end gap-2">
+          {confirmDelete ? (
+            <>
+              <span className="text-xs text-slate-500 mr-1">Remove this extra slot?</span>
+              <button
+                onClick={() => setConfirmDelete(false)}
+                className="px-2.5 py-1 text-xs text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+              >
+                Keep
+              </button>
+              <button
+                onClick={onDelete}
+                className="px-2.5 py-1 text-xs text-white bg-red-500 rounded-lg hover:bg-red-600 transition-colors font-semibold"
+              >
+                Remove
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => setConfirmDelete(true)}
+              className="flex items-center gap-1 text-xs text-slate-400 hover:text-red-500 transition-colors"
+            >
+              <Trash2 size={12} />
+              Remove slot
+            </button>
           )}
         </div>
-      </div>
-    </button>
+      )}
+    </div>
   );
 }

@@ -13,6 +13,7 @@ interface DealerStats {
   slots_no_show: number;
   total_19l: number;
   total_10l: number;
+  total_home: number;
   total_bottles: number;
 }
 
@@ -22,6 +23,7 @@ interface DaySummary {
   total_planned: number;
   filled_19l: number;
   filled_10l: number;
+  filled_home: number;
   planned_19l: number;
   planned_10l: number;
 }
@@ -60,7 +62,7 @@ export default function ReportsView() {
     const dayMap: Record<string, DaySummary> = {};
 
     weekDates.forEach(d => {
-      dayMap[d] = { date: d, total_filled: 0, total_planned: 0, filled_19l: 0, filled_10l: 0, planned_19l: 0, planned_10l: 0 };
+      dayMap[d] = { date: d, total_filled: 0, total_planned: 0, filled_19l: 0, filled_10l: 0, filled_home: 0, planned_19l: 0, planned_10l: 0 };
     });
 
     for (const s of (schedules ?? [])) {
@@ -77,6 +79,7 @@ export default function ReportsView() {
           slots_no_show: 0,
           total_19l: 0,
           total_10l: 0,
+          total_home: 0,
           total_bottles: 0,
         };
       }
@@ -92,10 +95,12 @@ export default function ReportsView() {
           stats[s.dealer_id].slots_completed++;
           stats[s.dealer_id].total_19l += vr.bottles_19l_out || 0;
           stats[s.dealer_id].total_10l += vr.bottles_10l_out || 0;
-          stats[s.dealer_id].total_bottles += (vr.bottles_19l_out || 0) + (vr.bottles_10l_out || 0);
-          dayMap[s.slot_date].total_filled += (vr.bottles_19l_out || 0) + (vr.bottles_10l_out || 0);
+          stats[s.dealer_id].total_home += vr.bottles_home || 0;
+          stats[s.dealer_id].total_bottles += (vr.bottles_19l_out || 0) + (vr.bottles_10l_out || 0) + (vr.bottles_home || 0);
+          dayMap[s.slot_date].total_filled += (vr.bottles_19l_out || 0) + (vr.bottles_10l_out || 0) + (vr.bottles_home || 0);
           dayMap[s.slot_date].filled_19l += vr.bottles_19l_out || 0;
           dayMap[s.slot_date].filled_10l += vr.bottles_10l_out || 0;
+          dayMap[s.slot_date].filled_home += vr.bottles_home || 0;
         } else if (vr.status === 'no_show') {
           stats[s.dealer_id].slots_no_show++;
         }
@@ -135,6 +140,7 @@ export default function ReportsView() {
   const totalPlanned = dayStats.reduce((sum, d) => sum + d.total_planned, 0);
   const totalFilled19 = dayStats.reduce((sum, d) => sum + d.filled_19l, 0);
   const totalFilled10 = dayStats.reduce((sum, d) => sum + d.filled_10l, 0);
+  const totalFilledHome = dayStats.reduce((sum, d) => sum + d.filled_home, 0);
   const totalPlanned19 = dayStats.reduce((sum, d) => sum + d.planned_19l, 0);
   const totalPlanned10 = dayStats.reduce((sum, d) => sum + d.planned_10l, 0);
 
@@ -178,6 +184,9 @@ export default function ReportsView() {
             <div>
               <div className="text-lg font-bold text-blue-600">{totalFilled19} <span className="text-xs font-normal text-slate-400">19L</span></div>
               <div className="text-lg font-bold text-cyan-600">{totalFilled10} <span className="text-xs font-normal text-slate-400">10L</span></div>
+              {totalFilledHome > 0 && (
+                <div className="text-lg font-bold text-emerald-500">{totalFilledHome} <span className="text-xs font-normal text-slate-400">Home</span></div>
+              )}
             </div>
             <div className="text-2xl font-bold text-slate-800">{totalFilled}</div>
           </div>
@@ -209,6 +218,12 @@ export default function ReportsView() {
                     <span className="text-slate-300 mx-1">19L</span>
                     <span className="text-cyan-600">{day.filled_10l}</span>/<span className="text-slate-400">{day.planned_10l}</span>
                     <span className="text-slate-300 ml-1">10L</span>
+                    {day.filled_home > 0 && (
+                      <>
+                        <span className="text-slate-300 mx-1">·</span>
+                        <span className="text-emerald-500">{day.filled_home} Home</span>
+                      </>
+                    )}
                   </span>
                 </div>
                 <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
@@ -256,6 +271,7 @@ export default function ReportsView() {
                   <div className="mt-2 flex gap-3 text-xs">
                     {ds.total_19l > 0 && <span className="text-blue-600">19L: {ds.total_19l}</span>}
                     {ds.total_10l > 0 && <span className="text-cyan-600">10L: {ds.total_10l}</span>}
+                    {ds.total_home > 0 && <span className="text-emerald-500">Home: {ds.total_home}</span>}
                     <div className="ml-auto flex items-center gap-1.5">
                       <div className="w-20 h-1.5 bg-slate-100 rounded-full overflow-hidden">
                         <div

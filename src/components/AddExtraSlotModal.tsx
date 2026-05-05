@@ -3,6 +3,7 @@ import { X, Plus } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useDealers } from '../hooks/useData';
 import { formatDate } from '../lib/utils';
+import TimeInput from './TimeInput';
 
 interface Props {
   date: string;
@@ -69,12 +70,7 @@ export default function AddExtraSlotModal({ date, onClose, onAdded }: Props) {
 
           <div>
             <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5 block">Scheduled Time</label>
-            <input
-              type="time"
-              value={time}
-              onChange={e => setTime(e.target.value)}
-              className="w-full border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-400"
-            />
+            <TimeInput value={time} onChange={setTime} className="w-full" />
           </div>
 
           <div className="grid grid-cols-2 gap-3">

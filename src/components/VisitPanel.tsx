@@ -3,6 +3,7 @@ import { X, Clock, CheckCircle, XCircle, Zap, Save, CloudOff, Cloud, Timer } fro
 import { supabase } from '../lib/supabase';
 import type { DailyScheduleWithDealer, VisitStatus } from '../lib/database.types';
 import { getDealerColor, formatTime, getCurrentTimeStr, formatFillDuration } from '../lib/utils';
+import TimeInput from './TimeInput';
 
 interface Props {
   slot: DailyScheduleWithDealer;
@@ -23,6 +24,7 @@ export default function VisitPanel({ slot, fillSpeed, onClose, onSaved }: Props)
   const [out19l, setOut19l] = useState(String(existing?.bottles_19l_out ?? 0));
   const [in10l, setIn10l] = useState(String(existing?.bottles_10l_in ?? slot.planned_10l));
   const [out10l, setOut10l] = useState(String(existing?.bottles_10l_out ?? 0));
+  const [homeBottles, setHomeBottles] = useState(String(existing?.bottles_home ?? 0));
   const [notes, setNotes] = useState(existing?.notes ?? '');
   const [recordedBy, setRecordedBy] = useState(existing?.recorded_by ?? '');
   const [saving, setSaving] = useState(false);
@@ -53,6 +55,7 @@ export default function VisitPanel({ slot, fillSpeed, onClose, onSaved }: Props)
       bottles_19l_out: parseInt(out19l) || 0,
       bottles_10l_in: parseInt(in10l) || 0,
       bottles_10l_out: parseInt(out10l) || 0,
+      bottles_home: parseInt(homeBottles) || 0,
       notes,
       recorded_by: recordedBy,
       synced_to_sheets: false,
@@ -189,12 +192,7 @@ export default function VisitPanel({ slot, fillSpeed, onClose, onSaved }: Props)
           {/* Arrival time */}
           <div>
             <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 block">Actual Arrival Time</label>
-            <input
-              type="time"
-              value={arrivalTime}
-              onChange={e => setArrivalTime(e.target.value)}
-              className="w-full border border-slate-200 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-400"
-            />
+            <TimeInput value={arrivalTime} onChange={setArrivalTime} className="w-full" />
           </div>
 
           {/* Bottle counts - 19L */}
@@ -254,6 +252,24 @@ export default function VisitPanel({ slot, fillSpeed, onClose, onSaved }: Props)
                   className="w-full border border-slate-200 rounded-xl px-4 py-3 text-lg font-bold text-slate-800 text-center focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-400"
                 />
               </div>
+            </div>
+          </div>
+
+          {/* Home bottles */}
+          <div>
+            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 block flex items-center gap-2">
+              <span className="w-3 h-3 rounded-full bg-emerald-400 inline-block" />
+              Home Bottles (Free)
+            </label>
+            <div className="flex items-center gap-3">
+              <input
+                type="number"
+                min="0"
+                value={homeBottles}
+                onChange={e => setHomeBottles(e.target.value)}
+                className="w-32 border border-slate-200 rounded-xl px-4 py-3 text-lg font-bold text-slate-800 text-center focus:outline-none focus:ring-2 focus:ring-emerald-300 focus:border-emerald-400"
+              />
+              <span className="text-xs text-slate-400">Free bottles delivered to customer's home</span>
             </div>
           </div>
 

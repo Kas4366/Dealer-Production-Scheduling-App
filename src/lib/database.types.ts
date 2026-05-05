@@ -102,6 +102,7 @@ export interface VisitRecord {
   bottles_19l_out: number;
   bottles_10l_in: number;
   bottles_10l_out: number;
+  bottles_home: number;
   notes: string;
   recorded_by: string;
   synced_to_sheets: boolean;
