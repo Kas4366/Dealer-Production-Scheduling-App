@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, Clock, Package, CheckCircle, XCircle, AlertCircle, RefreshCw, ArrowRightLeft, ArrowRight, Plus, Zap, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Clock, Package, CheckCircle, XCircle, AlertCircle, RefreshCw, ArrowRightLeft, ArrowRight, Plus, Zap, Trash2, Check } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useDailySchedule, useDealers, useProductionSettings } from '../hooks/useData';
 import {
@@ -356,6 +356,14 @@ function SlotCard({ slot, currentTime, fillSpeed, onClick, onDelete }: {
                 {vr.bottles_home > 0 && (
                   <span className="text-emerald-500">Home: {vr.bottles_home}</span>
                 )}
+              </div>
+            )}
+
+            {/* Saved record indicator */}
+            {vr && vr.updated_at && (
+              <div className="flex items-center gap-1 mt-1.5 text-[10px] text-emerald-600 font-medium">
+                <Check size={10} strokeWidth={3} />
+                <span>Saved {new Date(vr.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
               </div>
             )}
           </div>

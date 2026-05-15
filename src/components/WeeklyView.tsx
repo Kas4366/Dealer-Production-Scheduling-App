@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { useWeeklyTemplates, useDealers } from '../hooks/useData';
 import { DAY_NAMES, DAY_SHORT, formatTime, getDealerColor } from '../lib/utils';
 import type { WeeklyTemplateWithDealer } from '../lib/database.types';
+import TimeInput from './TimeInput';
 import { supabase } from '../lib/supabase';
 
 export default function WeeklyView() {
@@ -202,8 +203,7 @@ function AddSlotButton({ dayOfWeek, dealers, onAdded }: {
             <option key={d.id} value={d.id}>{d.code} - {d.name}</option>
           ))}
         </select>
-        <input type="time" value={time} onChange={e => setTime(e.target.value)}
-          className="w-full text-xs border border-slate-200 rounded px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300" />
+        <TimeInput value={time} onChange={setTime} className="w-full text-xs py-1 px-1.5" />
         <div className="flex gap-1">
           <input type="number" placeholder="19L" min="0" value={qty19l} onChange={e => setQty19l(e.target.value)}
             className="w-1/2 text-xs border border-slate-200 rounded px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300" />

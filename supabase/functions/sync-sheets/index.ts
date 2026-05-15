@@ -7,6 +7,8 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
+const SHEET_TAB = "Daily Records";
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
@@ -40,13 +42,10 @@ Deno.serve(async (req: Request) => {
       `);
 
     if (record_ids && record_ids.length > 0) {
-      // Targeted sync: only the specific records requested
       query = query.in("id", record_ids);
     } else if (week_dates && week_dates.length > 0) {
-      // Week sync: all records for given dates
       query = query.in("slot_date", week_dates);
     } else {
-      // Fallback: all unsynced records
       query = query.eq("synced_to_sheets", false);
     }
 
@@ -59,7 +58,6 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // Get Google service account credentials
     const serviceAccountJson = Deno.env.get("GOOGLE_SERVICE_ACCOUNT_JSON");
     if (!serviceAccountJson) {
       return new Response(JSON.stringify({ error: "GOOGLE_SERVICE_ACCOUNT_JSON secret not configured" }), {
@@ -71,50 +69,47 @@ Deno.serve(async (req: Request) => {
     const serviceAccount = JSON.parse(serviceAccountJson);
     const accessToken = await getGoogleAccessToken(serviceAccount);
 
-    // Build rows for Google Sheets
-    const rows = records.map((r: any) => {
-      const ds = r.daily_schedule;
-      const date = new Date(r.slot_date + "T00:00:00");
-      const dayName = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][date.getDay()];
-      const changeType = ds?.change_type ?? "";
-      const originalDay = ds?.original_date ? new Date(ds.original_date + "T00:00:00").toLocaleDateString("en-GB") : "";
-      const swappedWith = ds?.swapped_with_dealer?.name ?? "";
+    // Collect existing sheet row numbers that need to be deleted before re-appending.
+    // Sort descending so deleting higher rows first doesn't shift the indices of lower rows.
+    const rowsToDelete: number[] = records
+      .filter((r: any) => r.sheet_row_number != null)
+      .map((r: any) => r.sheet_row_number as number)
+      .sort((a: number, b: number) => b - a);
 
-      // Saved date (S) and saved time (T) from updated_at, in Sri Lanka time (UTC+5:30)
-      const savedAt = r.updated_at ? new Date(r.updated_at) : null;
-      const savedDate = savedAt
-        ? savedAt.toLocaleDateString("en-GB", { timeZone: "Asia/Colombo" })
-        : "";
-      const savedTime = savedAt
-        ? savedAt.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "Asia/Colombo" })
-        : "";
+    if (rowsToDelete.length > 0) {
+      const tabId = await getSheetTabId(sheet_id, SHEET_TAB, accessToken);
+      const deleteRequests = rowsToDelete.map((rowIdx: number) => ({
+        deleteDimension: {
+          range: {
+            sheetId: tabId,
+            dimension: "ROWS",
+            // Sheets API uses 0-indexed; our stored value is 1-indexed
+            startIndex: rowIdx - 1,
+            endIndex: rowIdx,
+          },
+        },
+      }));
 
-      return [
-        date.toLocaleDateString("en-GB"),          // A: Date
-        dayName,                                     // B: Day
-        r.dealer?.name ?? "",                        // C: Dealer Name
-        ds?.scheduled_time ?? "",                    // D: Scheduled Time
-        r.status,                                    // E: Slot Status
-        ds?.status ?? "",                            // F: Slot Note (schedule status)
-        r.actual_arrival_time ?? "",                 // G: Actual Arrival Time
-        r.bottles_19l_in ?? 0,                       // H: 19L Bottles In
-        r.bottles_19l_out ?? 0,                      // I: 19L Bottles Out
-        r.bottles_10l_in ?? 0,                       // J: 10L Bottles In
-        r.bottles_10l_out ?? 0,                      // K: 10L Bottles Out
-        (r.bottles_19l_out ?? 0) + (r.bottles_10l_out ?? 0), // L: Total Bottles Filled
-        (ds?.planned_19l ?? 0) + (ds?.planned_10l ?? 0),     // M: Planned Quantity
-        changeType,                                  // N: Slot Change Type
-        originalDay,                                 // O: Original Day (if moved)
-        swappedWith,                                 // P: Swapped With
-        r.recorded_by ?? "",                         // Q: Recorded By
-        r.notes ?? "",                               // R: Notes
-        savedDate,                                   // S: Saved Date
-        savedTime,                                   // T: Saved Time
-      ];
-    });
+      const batchUpdateUrl = `https://sheets.googleapis.com/v4/spreadsheets/${sheet_id}:batchUpdate`;
+      const batchRes = await fetch(batchUpdateUrl, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ requests: deleteRequests }),
+      });
 
-    // Append to Google Sheet
-    const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${sheet_id}/values/Daily%20Records!A:T:append?valueInputOption=USER_ENTERED`;
+      if (!batchRes.ok) {
+        const errText = await batchRes.text();
+        throw new Error(`Google Sheets batchUpdate (delete rows) error: ${errText}`);
+      }
+    }
+
+    // Build and append fresh rows
+    const rows = records.map((r: any) => buildRow(r));
+
+    const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${sheet_id}/values/${encodeURIComponent(SHEET_TAB + "!A:U")}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
     const sheetsRes = await fetch(appendUrl, {
       method: "POST",
       headers: {
@@ -126,12 +121,26 @@ Deno.serve(async (req: Request) => {
 
     if (!sheetsRes.ok) {
       const errText = await sheetsRes.text();
-      throw new Error(`Google Sheets API error: ${errText}`);
+      throw new Error(`Google Sheets API append error: ${errText}`);
     }
 
-    // Mark records as synced
-    const ids = records.map((r: any) => r.id);
-    await supabase.from("visit_records").update({ synced_to_sheets: true }).in("id", ids);
+    const appendData = await sheetsRes.json();
+
+    // Parse the start row from the response (e.g. "Daily Records!A47:U49" → 47)
+    const updatedRange: string = appendData?.updates?.updatedRange ?? "";
+    const startRow = parseStartRow(updatedRange);
+
+    if (startRow !== null) {
+      for (let i = 0; i < records.length; i++) {
+        await supabase
+          .from("visit_records")
+          .update({ synced_to_sheets: true, sheet_row_number: startRow + i })
+          .eq("id", records[i].id);
+      }
+    } else {
+      const ids = records.map((r: any) => r.id);
+      await supabase.from("visit_records").update({ synced_to_sheets: true }).in("id", ids);
+    }
 
     return new Response(JSON.stringify({ message: "Synced successfully", count: rows.length }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -143,6 +152,73 @@ Deno.serve(async (req: Request) => {
     });
   }
 });
+
+// Cache the sheet tab's numeric sheetId within a single request execution
+const sheetTabIdCache: Record<string, number> = {};
+
+async function getSheetTabId(spreadsheetId: string, tabName: string, accessToken: string): Promise<number> {
+  const cacheKey = `${spreadsheetId}:${tabName}`;
+  if (sheetTabIdCache[cacheKey] !== undefined) return sheetTabIdCache[cacheKey];
+
+  const metaUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties`;
+  const metaRes = await fetch(metaUrl, {
+    headers: { "Authorization": `Bearer ${accessToken}` },
+  });
+  if (!metaRes.ok) throw new Error("Could not fetch spreadsheet metadata");
+  const meta = await metaRes.json();
+  const sheet = meta.sheets?.find((s: any) => s.properties?.title === tabName);
+  if (!sheet) throw new Error(`Sheet tab "${tabName}" not found`);
+  const id = sheet.properties.sheetId as number;
+  sheetTabIdCache[cacheKey] = id;
+  return id;
+}
+
+function parseStartRow(updatedRange: string): number | null {
+  // e.g. "Daily Records!A47:U49" — extract first row number after the "!"
+  const match = updatedRange.match(/![^0-9]*(\d+)/);
+  return match ? parseInt(match[1], 10) : null;
+}
+
+function buildRow(r: any): unknown[] {
+  const ds = r.daily_schedule;
+  const date = new Date(r.slot_date + "T00:00:00");
+  const dayName = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][date.getDay()];
+  const changeType = ds?.change_type ?? "";
+  const originalDay = ds?.original_date ? new Date(ds.original_date + "T00:00:00").toLocaleDateString("en-GB") : "";
+  const swappedWith = ds?.swapped_with_dealer?.name ?? "";
+
+  const savedAt = r.updated_at ? new Date(r.updated_at) : null;
+  const savedDate = savedAt
+    ? savedAt.toLocaleDateString("en-GB", { timeZone: "Asia/Colombo" })
+    : "";
+  const savedTime = savedAt
+    ? savedAt.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "Asia/Colombo" })
+    : "";
+
+  return [
+    date.toLocaleDateString("en-GB"),          // A: Date
+    dayName,                                     // B: Day
+    r.dealer?.name ?? "",                        // C: Dealer Name
+    ds?.scheduled_time ?? "",                    // D: Scheduled Time
+    r.status,                                    // E: Slot Status
+    ds?.status ?? "",                            // F: Slot Note (schedule status)
+    r.actual_arrival_time ?? "",                 // G: Actual Arrival Time
+    r.bottles_19l_in ?? 0,                       // H: 19L Bottles In
+    r.bottles_19l_out ?? 0,                      // I: 19L Bottles Out
+    r.bottles_10l_in ?? 0,                       // J: 10L Bottles In
+    r.bottles_10l_out ?? 0,                      // K: 10L Bottles Out
+    r.bottles_home ?? 0,                         // L: Home Bottles
+    (r.bottles_19l_out ?? 0) + (r.bottles_10l_out ?? 0) + (r.bottles_home ?? 0), // M: Total Filled
+    (ds?.planned_19l ?? 0) + (ds?.planned_10l ?? 0),  // N: Planned Quantity
+    changeType,                                  // O: Slot Change Type
+    originalDay,                                 // P: Original Day (if moved)
+    swappedWith,                                 // Q: Swapped With
+    r.recorded_by ?? "",                         // R: Recorded By
+    r.notes ?? "",                               // S: Notes
+    savedDate,                                   // T: Saved Date
+    savedTime,                                   // U: Saved Time
+  ];
+}
 
 async function getGoogleAccessToken(serviceAccount: any): Promise<string> {
   const now = Math.floor(Date.now() / 1000);

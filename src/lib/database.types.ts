@@ -106,6 +106,7 @@ export interface VisitRecord {
   notes: string;
   recorded_by: string;
   synced_to_sheets: boolean;
+  sheet_row_number: number | null;
   created_at: string;
   updated_at: string;
 }
